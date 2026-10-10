@@ -6,6 +6,8 @@ Tout est construit avec **n8n**, sans framework d'agents : un webhook, du JavaSc
 
 ![Commentaire posté par l'agent sur une PR](docs/commentaire.png)
 
+*Exemple réel : deux agents relèvent des points, l'agent Sécurité répond « RAS » — il n'invente pas de problème quand il n'y en a pas.*
+
 ## Comment ça marche
 
 ```mermaid
