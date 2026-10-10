@@ -80,4 +80,4 @@ Le travail sur les prompts a réduit les tokens de sortie de 67 % (de commentair
 
 ## Contexte
 
-Projet d'apprentissage mené par phases (webhook → HMAC → diff → 1 agent → 3 agents → logs), chacune avec un mini-RFC écrit avant de coder et un bilan après. Venant de la QA, je trouve l'agent **Tests** le plus intéressant : il repère le code ajouté sans test et propose des cas limites concrets.
+Projet d'apprentissage mené par phases (webhook → HMAC → diff → 1 agent → 3 agents → logs), chacune avec un mini-RFC écrit avant de coder et un bilan après. L'agent **Tests** est celui qui m'a le plus appris : il ne vérifie pas si le code marche, il repère le code ajouté sans test et propose des cas limites à couvrir.
