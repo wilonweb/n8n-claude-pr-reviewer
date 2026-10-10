@@ -1,0 +1,799 @@
+{
+  "name": "PR Reviewer (n8n + Claude)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-pr-review",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -176
+      ],
+      "id": "52df6a93-31a6-4ce8-85c4-4896db9dbc22",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.first();\nconst secret = $env.GITHUB_WEBHOOK_SECRET;\nconst headers = item.json.headers || {};\nconst signature = headers['x-hub-signature-256'] || '';\nconst event = headers['x-github-event'];\n\n// Pas de body brut (ex : test manuel avec données épinglées) → on rejette au lieu de planter\nif (!item.binary || !item.binary.data) {\n  return [{ json: { valid: false, event, body: item.json.body } }];\n}\n\n// Body brut (option Raw Body du Webhook) — la signature est calculée dessus, pas sur le JSON reparsé\nconst rawBody = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');\n\n// Comparaison à temps constant (évite les attaques par mesure de temps)\nconst a = Buffer.from(signature);\nconst b = Buffer.from(expected);\nconst valid = a.length === b.length && crypto.timingSafeEqual(a, b);\n\nreturn [{ json: { valid, event, body: item.json.body } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -176
+      ],
+      "id": "63e98e22-2892-4cfb-8c90-fda2adf1b27c",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "74269cae-379e-43cf-9f99-53a1e59ec9b0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        432,
+        -176
+      ],
+      "id": "9da5ea58-c709-41ec-86ed-ad25f9e87b72",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": true\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        624,
+        -336
+      ],
+      "id": "b6d5c13b-7c33-4630-bb6c-c20b7dd7ed58",
+      "name": "Code 200"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"invalid signature\"\n}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        624,
+        -32
+      ],
+      "id": "24bd4194-4cea-4f9e-a75a-80de1ca759bc",
+      "name": "Code 401"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "acca2cc9-1580-4fe8-a9a9-4b795e631f9b",
+              "leftValue": "={{ $json.event }}",
+              "rightValue": "pull_request",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "241343f1-6115-457b-b1f2-90353a08aae1",
+              "leftValue": "={{ ['opened', 'synchronize', 'reopened'].includes($json.body.action) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        848,
+        -176
+      ],
+      "id": "25516f04-cf29-4a80-9a5b-dc09942ed3f2",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.body.repository.full_name }}/pulls/{{ $json.body.pull_request.number }}/files?per_page=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        -176
+      ],
+      "id": "b71bb420-e28a-401b-9f90-52853d8a5b3e",
+      "name": "HTTP Request",
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_ME",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Limites pour ne pas exploser le contexte du LLM\nconst MAX_PER_FILE = 3000;\nconst MAX_TOTAL = 20000;\n\nconst files = $input.all().map(i => i.json);\n\nlet diff = '';\nlet truncated = false;\nconst skipped = [];\n\nfor (const f of files) {\n  // Pas de patch = fichier binaire ou trop gros côté GitHub\n  if (!f.patch) {\n    skipped.push(f.filename);\n    continue;\n  }\n\n  let patch = f.patch;\n  if (patch.length > MAX_PER_FILE) {\n    patch = patch.slice(0, MAX_PER_FILE) + '\\n[... tronqué]';\n    truncated = true;\n  }\n\n  const block = `### ${f.filename} (${f.status})\\n${patch}\\n\\n`;\n\n  if (diff.length + block.length > MAX_TOTAL) {\n    diff += '[... diff total tronqué, fichiers suivants ignorés]\\n';\n    truncated = true;\n    break;\n  }\n  diff += block;\n}\n\nreturn [{\n  json: {\n    diff,\n    files_count: files.length,\n    truncated,\n    skipped,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -176
+      ],
+      "id": "d63e2ccc-57aa-4b2c-8e69-7234bad3a3d1",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $('Filter').first().json.body.repository.full_name }}/issues/{{ \n  $('Filter').first().json.body.pull_request.number }}/comments",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "={{ $json.comment }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2848,
+        -32
+      ],
+      "id": "c696e5f7-c880-4d32-8a49-79447a890c7d",
+      "name": "HTTP Request1",
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_ME",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1808,
+        -192
+      ],
+      "id": "9a7af55c-fb8d-45dc-bc18-f97c76dea57d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "  // Récupère la réponse de chaque agent par son NOM de nœud (d'où l'importance de la majuscule)\n  const qualite  = $('Agent Qualité').first().json.merged_response;\n  const securite = $('Agent Sécurité').first().json.merged_response;\n  const tests    = $('Agent Tests').first().json.merged_response;\n    \n  const comment = [\n    '<!-- pr-review-bot -->',      // marqueur invisible pour retrouver notre commentaire\n    '## 🤖 Review automatique',\n    '### 🧹 Qualité',\n    qualite,\n    '### 🔒 Sécurité',\n    securite,\n    '### 🧪 Tests',\n    tests,\n  ].join('\\n\\n'); \n\n  // UN seul item en sortie → un seul POST\n  return [{ json: { comment } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -192
+      ],
+      "id": "8276e5db-6395-4a1a-95a4-1883c265f2a1",
+      "name": "Assemblage"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $('Filter').first().json.body.repository.full_name }}/issues/{{$('Filter').first().json.body.pull_request.number }}/comments ",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2256,
+        -192
+      ],
+      "id": "b8d8fe3f-9f33-46a8-8991-4cf66e3eb0ef",
+      "name": "Get Commentaires",
+      "alwaysOutputData": true,
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_ME",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "  const MARQUEUR = '<!-- pr-review-bot -->'; \n\n  // Tous les commentaires renvoyés par GitHub (1 item = 1 commentaire ; {} si aucun)\n  const commentaires = $input.all().map(item => item.json);\n      \n  // Le nôtre = celui dont le texte (body) contient le marqueur\n  const existant = commentaires.find(c => typeof c.body === 'string' && c.body.includes(MARQUEUR));\n     \n  return [{\n    json: {\n      comment: $('Assemblage').first().json.comment,  // le texte de la review (pas dans $json ici !)\n      commentId: existant ? existant.id : null,         // id si trouvé, sinon null → POST\n    }\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -192
+      ],
+      "id": "86ff90b4-3ee9-439e-b284-eaa97c605e21",
+      "name": "Trouver commentaire"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8efe6701-4cfa-4cf1-9f86-87001c94c8ec",
+              "leftValue": "={{ $json.commentId !== null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2640,
+        -192
+      ],
+      "id": "cd830ae2-ba16-47f6-b61e-1c3cf903bcf5",
+      "name": "deja commenté ?"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.github.com/repos/{{ $('Filter').first().json.body.repository.full_name }}/issues/comments/{{$json.commentId }}          ",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "={{ $json.comment }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2832,
+        -208
+      ],
+      "id": "420b711e-25c1-47f0-a48d-41e876fa7027",
+      "name": "PATCH commentaire",
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_ME",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-opus-5",
+          "mode": "list",
+          "cachedResultName": "claude-opus-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Tu es un relecteur de code expérimenté, spécialisé en qualité de code. Voici une Pull Request GitHub.\n\nTitre : {{ $('Filter').first().json.body.pull_request.title }}\nFichiers modifiés : {{ $json.files_count }}\n{{ $json.truncated ? \"⚠️ Le diff a été tronqué : tu n'en vois qu'une partie.\" : \"\" }}\n\nAnalyse le diff ci-dessous et relève uniquement les problèmes de qualité de code : lisibilité, nommage, bugs potentiels, duplication, mauvaises pratiques.\nIgnore la sécurité et les tests (d'autres agents s'en occupent).\nFormat de réponse STRICT :\n- en français, en Markdown, sans titre ni introduction ni conclusion ;\n- 4 points maximum, chacun sur UNE ligne : `- **fichier** : problème → correction suggérée` (2 phrases max) ;\n- ne signale que les problèmes réels de ta spécialité, pas les remarques mineures ou hypothétiques ;\n- s'il n'y a rien à signaler, réponds uniquement « RAS », sans aucun autre mot.\n\n<diff>\n{{ $json.diff }}\n</diff>"
+            }
+          ]
+        },
+        "simplify": false,
+        "options": {
+          "includeMergedResponse": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1456,
+        -528
+      ],
+      "id": "8ebe6af7-ff4c-4b25-a543-ac8a1457db12",
+      "name": "Agent Qualité",
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-opus-5",
+          "mode": "list",
+          "cachedResultName": "claude-opus-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Tu es un relecteur de code expérimenté, spécialisé en sécurité applicative. Voici une Pull Request GitHub.\n\nTitre : {{ $('Filter').first().json.body.pull_request.title }}\nFichiers modifiés : {{ $json.files_count }}\n{{ $json.truncated ? \"⚠️ Le diff a été tronqué : tu n'en vois qu'une partie.\" : \"\" }}\n\nAnalyse le diff ci-dessous et relève uniquement les problèmes de sécurité : secrets ou clés en dur, injections (SQL, commandes, XSS), entrées utilisateur non validées, données sensibles exposées (logs, réponses), dépendances ou fonctions dangereuses.\nIgnore la qualité de code et les tests (d'autres agents s'en occupent).\nFormat de réponse STRICT :\n- en français, en Markdown, sans titre ni introduction ni conclusion ;\n- 4 points maximum, chacun sur UNE ligne : `- **fichier** : problème → correction suggérée` (2 phrases max) ;\n- ne signale que les problèmes réels de ta spécialité, pas les remarques mineures ou hypothétiques ;\n- s'il n'y a rien à signaler, réponds uniquement « RAS », sans aucun autre mot.\n\n<diff>\n{{ $json.diff }}\n</diff>"
+            }
+          ]
+        },
+        "simplify": false,
+        "options": {
+          "includeMergedResponse": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        -176
+      ],
+      "id": "726b67bf-2f12-42c3-8c22-5848b8482a9c",
+      "name": "Agent Sécurité",
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-opus-5",
+          "mode": "list",
+          "cachedResultName": "claude-opus-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Tu es un relecteur de code expérimenté, spécialisé en tests logiciels (QA). Voici une Pull Request GitHub.\n\nTitre : {{ $('Filter').first().json.body.pull_request.title }}\nFichiers modifiés : {{ $json.files_count }}\n{{ $json.truncated ? \"⚠️ Le diff a été tronqué : tu n'en vois qu'une partie.\" : \"\" }}\n\nAnalyse le diff ci-dessous et relève uniquement ce qui concerne les tests : code ajouté ou modifié sans test associé, cas limites oubliés (valeurs vides, nulles, erreurs), tests existants à mettre à jour.\nPropose des cas de test concrets quand c'est pertinent.\nIgnore la qualité de code et la sécurité (d'autres agents s'en occupent).\nFormat de réponse STRICT :\n- en français, en Markdown, sans titre ni introduction ni conclusion ;\n- 4 points maximum, chacun sur UNE ligne : `- **fichier** : problème → correction suggérée` (2 phrases max) ;\n- ne signale que les problèmes réels de ta spécialité, pas les remarques mineures ou hypothétiques ;\n- s'il n'y a rien à signaler, réponds uniquement « RAS », sans aucun autre mot.\n\n<diff>\n{{ $json.diff }}\n</diff>"
+            }
+          ]
+        },
+        "simplify": false,
+        "options": {
+          "includeMergedResponse": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1472,
+        64
+      ],
+      "id": "b90449cf-c903-4b79-b26e-b17bc3c10bd3",
+      "name": "Agent Tests",
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": " // Une ligne par agent → 3 items → le nœud Postgres fera 3 INSERT\n  const pr = $('Filter').first().json.body;\n  const agents = ['Qualité', 'Sécurité', 'Tests'];\n    \n  return agents.map(agent => {\n    const r = $('Agent ' + agent).first().json;\n    return {\n      json: {\n        repo: pr.repository.full_name,\n        pr_number: pr.pull_request.number,\n        agent,\n        resultat: r.merged_response,\n        prompt_tokens: r.usage.input_tokens,\n        completion_tokens: r.usage.output_tokens,\n      },\n    };\n  });    "
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        -496
+      ],
+      "id": "35520dc6-5348-4766-92db-cbe060a6608c",
+      "name": "Préparer logs"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "pr_reviews",
+          "mode": "list",
+          "cachedResultName": "pr_reviews"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": 0,
+            "pr_number": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "repo",
+              "displayName": "repo",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pr_number",
+              "displayName": "pr_number",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "agent",
+              "displayName": "agent",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resultat",
+              "displayName": "resultat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "prompt_tokens",
+              "displayName": "prompt_tokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completion_tokens",
+              "displayName": "completion_tokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2400,
+        -416
+      ],
+      "id": "cd7e4483-b20f-4cd1-b337-1f79f1ebe5e0",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Code 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 200": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Agent Qualité",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent Sécurité",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Assemblage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemblage": {
+      "main": [
+        [
+          {
+            "node": "Préparer logs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Commentaires",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Commentaires": {
+      "main": [
+        [
+          {
+            "node": "Trouver commentaire",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trouver commentaire": {
+      "main": [
+        [
+          {
+            "node": "deja commenté ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "deja commenté ?": {
+      "main": [
+        [
+          {
+            "node": "PATCH commentaire",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent Qualité": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent Sécurité": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Agent Tests": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Préparer logs": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
