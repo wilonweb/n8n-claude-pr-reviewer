@@ -4,6 +4,8 @@ Un agent qui relit automatiquement les Pull Requests GitHub. À chaque push sur 
 
 Tout est construit avec **n8n**, sans framework d'agents : un webhook, du JavaScript et des appels HTTP.
 
+Le découpage en agents s'inspire du livre gratuit [*What to Look for in a Code Review*](https://leanpub.com/whattolookforinacodereview) (Trisha Gee, JetBrains). Une bonne review regarde plusieurs axes distincts (qualité, tests, sécurité…), et chaque équipe choisit ceux qui comptent pour elle. Ici, chaque axe a son agent spécialisé, avec ses propres consignes, et ignore volontairement le travail des autres.
+
 ![Commentaire posté par l'agent sur une PR](docs/commentaire.png)
 
 *Exemple réel : deux agents relèvent des points, l'agent Sécurité répond « RAS » — il n'invente pas de problème quand il n'y en a pas.*
@@ -62,6 +64,7 @@ Le travail sur les prompts a réduit les tokens de sortie de 67 % (de commentair
 - **n8n exécute les 3 branches l'une après l'autre**, pas vraiment en parallèle : la durée totale est la somme des trois.
 - **Chaque push déclenche une review payante** : il n'y a pas encore de filtre sur la taille du diff ni de bouton pour désactiver la review.
 - **Les erreurs ne sont pas journalisées** : seules les reviews réussies arrivent en base.
+- **Les agents ne voient que le diff** : ils ne savent pas où le code modifié est utilisé ailleurs dans le repo, ni s'il s'intègre bien dans l'architecture globale.
 
 ## L'installer chez soi
 
@@ -78,6 +81,11 @@ Le travail sur les prompts a réduit les tokens de sortie de 67 % (de commentair
 - Ignorer les PR trop grosses ou les fichiers générés
 - Journaliser aussi les échecs
 - Configuration par projet : choisir les prompts et le modèle selon le repo (un fichier `.pr-reviewer.yml` lu dans le repo, ou une table de config dans Postgres). Exemples : critères adaptés au langage ou au framework, modèle léger pour les petits repos, agents activés ou non
+- Donner aux agents la **description de la PR** (pas seulement son titre), pour vérifier que le code fait ce qu'elle annonce
+- Un **niveau de gravité** sur chaque remarque (🔴 bloquant / 🟡 à discuter / 💡 suggestion)
+- Laisser le formatage et le style à un linter, pour concentrer le LLM sur ce qu'un outil ne sait pas faire
+- Enrichir les consignes : nouvelles dépendances, routes sans authentification, branches non testées, code mort ou de debug, requêtes en boucle
+- Fournir aux agents les fichiers complets autour du diff, pour juger l'impact du changement
 
 ## Contexte
 
