@@ -4,7 +4,10 @@ Un agent qui relit automatiquement les Pull Requests GitHub. À chaque push sur 
 
 Tout est construit avec **n8n**, sans framework d'agents : un webhook, du JavaScript et des appels HTTP.
 
-Le découpage en agents s'inspire du livre gratuit [*What to Look for in a Code Review*](https://leanpub.com/whattolookforinacodereview) (Trisha Gee, JetBrains). Une bonne review regarde plusieurs axes distincts (qualité, tests, sécurité…), et chaque équipe choisit ceux qui comptent pour elle. Ici, chaque axe a son agent spécialisé, avec ses propres consignes, et ignore volontairement le travail des autres.
+Le découpage en agents s'inspire de deux livres gratuits sur la code review :
+
+- [*What to Look for in a Code Review*](https://leanpub.com/whattolookforinacodereview) (Trisha Gee, JetBrains) : une bonne review regarde plusieurs axes distincts (qualité, tests, sécurité…), et chaque équipe choisit ceux qui comptent pour elle. Ici, chaque axe a son agent spécialisé, avec ses propres consignes, et ignore volontairement le travail des autres.
+- *Best Kept Secrets of Peer Code Review* (Jason Cohen, SmartBear) : d'après les études qu'il rassemble, la plupart des défauts sont trouvés par des relecteurs qui travaillent **chacun de leur côté**, et une review perd en efficacité au-delà de quelques centaines de lignes. D'où des agents indépendants, et un diff tronqué.
 
 ![Commentaire posté par l'agent sur une PR](docs/commentaire.png)
 
@@ -86,6 +89,10 @@ Le travail sur les prompts a réduit les tokens de sortie de 67 % (de commentair
 - Laisser le formatage et le style à un linter, pour concentrer le LLM sur ce qu'un outil ne sait pas faire
 - Enrichir les consignes : nouvelles dépendances, routes sans authentification, branches non testées, code mort ou de debug, requêtes en boucle
 - Fournir aux agents les fichiers complets autour du diff, pour juger l'impact du changement
+- Signaler les PR trop grosses (au-delà de ~400 lignes modifiées) et conseiller de les découper, plutôt que de les relire mal
+- Un agent « modérateur » après les 3 autres, pour supprimer les doublons et écarter les faux positifs
+- À chaque nouveau push, indiquer quelles remarques de la review précédente ont été corrigées
+- Enregistrer chaque remarque avec son type et sa gravité, pour voir dans Postgres les problèmes les plus fréquents et faire évoluer les consignes
 
 ## Contexte
 
