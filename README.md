@@ -77,6 +77,7 @@ Le travail sur les prompts a réduit les tokens de sortie de 67 % (de commentair
 - Réduire la réflexion du modèle (coût et durée), ou utiliser un modèle plus léger pour l'agent Sécurité
 - Ignorer les PR trop grosses ou les fichiers générés
 - Journaliser aussi les échecs
+- Configuration par projet : choisir les prompts et le modèle selon le repo (un fichier `.pr-reviewer.yml` lu dans le repo, ou une table de config dans Postgres). Exemples : critères adaptés au langage ou au framework, modèle léger pour les petits repos, agents activés ou non
 
 ## Contexte
 
